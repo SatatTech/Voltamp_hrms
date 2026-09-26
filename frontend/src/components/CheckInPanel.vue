@@ -34,7 +34,7 @@
 					:readOnly="isFieldLocked(field.fieldname)"
 					:linkFilters="linkFiltersFor(field.fieldname)"
 					:query="queryFor(field.fieldname)"
-					:modelValue="isFieldLocked(field.fieldname) ? lastLog[field.fieldname] : timesheetDetail[field.fieldname]"
+					:modelValue="isFieldLocked(field.fieldname) ? openSession[field.fieldname] : timesheetDetail[field.fieldname]"
 					@update:modelValue="(v) => (timesheetDetail[field.fieldname] = v)"
 				/>
 			</div>
@@ -42,39 +42,54 @@
 			<WorkEvidenceSection
 				class="mt-3"
 				referenceDoctype="Timesheet"
-				:referenceName="activeTimesheet"
-				:canWrite="!isCycleActive || canEditTimesheetEvidence"
+				:referenceName="todayTimesheet"
+				:canWrite="true"
 				:emptyReferenceHint="__('Preparing Work Evidence…')"
 			/>
 
-			<Button
-				v-if="pendingTimesheet"
-				class="mt-4 mb-1 drop-shadow-sm py-5 text-base disabled:bg-gray-700"
-				:loading="submitTimesheetAction.loading || timesheetDoc.loading || saveTimesheetDoc.loading"
-				:disabled="timesheetDetailLoading"
-				@click="handleSubmitTimesheet"
-			>
-				<template #prefix>
-					<FeatherIcon name="check-circle" class="w-4" />
-				</template>
-				{{ __("Submit Timesheet") }}
-			</Button>
+			<div v-if="todayDay" class="mt-3 rounded border border-gray-200 px-3 py-2.5">
+				<div class="flex flex-row justify-between text-sm font-semibold text-gray-900">
+					<span>{{ __("Today's Sessions ({0})", [todayDay.sessions.length]) }}</span>
+					<span>{{ __("Total {0} h", [formatHours(todayDay.total_hours)]) }}</span>
+				</div>
+				<SessionRow v-for="session in todayDay.sessions" :key="session.name" :session="session" />
+				<div v-if="todayDay.employee_confirmed" class="mt-2 text-xs font-medium text-green-700">
+					{{ __("Submitted. It will be sent for approval after midnight - sessions you add later today are included.") }}
+				</div>
+			</div>
 
-			<Button
-				v-else
-				class="mt-4 mb-1 drop-shadow-sm py-5 text-base disabled:bg-gray-700"
-				:loading="checkins.list.loading || timesheetDetailLoading"
-				:disabled="checkinDetailMissing"
-				@click="handleEmployeeCheckin"
-			>
-				<template #prefix>
-					<FeatherIcon
-						:name="nextAction.action === 'IN' ? 'arrow-right-circle' : 'arrow-left-circle'"
-						class="w-4"
-					/>
-				</template>
-				{{ nextAction.label }}
-			</Button>
+			<div v-if="unconfirmedEarlierDays.length" class="mt-2 text-xs font-medium text-orange-700">
+				{{ __("{0} earlier day(s) not submitted yet.", [unconfirmedEarlierDays.length]) }}
+			</div>
+
+			<div class="flex flex-row gap-3 mt-4 mb-1">
+				<Button
+					class="w-full drop-shadow-sm py-5 text-base disabled:bg-gray-700"
+					:loading="sessionState.loading"
+					:disabled="checkinDetailMissing"
+					@click="handleEmployeeCheckin"
+				>
+					<template #prefix>
+						<FeatherIcon
+							:name="nextAction.action === 'IN' ? 'arrow-right-circle' : 'arrow-left-circle'"
+							class="w-4"
+						/>
+					</template>
+					{{ nextAction.label }}
+				</Button>
+
+				<Button
+					class="w-full drop-shadow-sm py-5 text-base disabled:bg-gray-700"
+					:loading="submitTimesheetAction.loading"
+					:disabled="!canSubmitTimesheet"
+					@click="handleSubmitTimesheet"
+				>
+					<template #prefix>
+						<FeatherIcon name="check-circle" class="w-4" />
+					</template>
+					{{ __("Submit Timesheet") }}
+				</Button>
+			</div>
 		</template>
 
 		<div v-else class="font-medium text-sm text-gray-500 mt-1.5">
@@ -119,7 +134,7 @@
 				</template>
 
 				<Button
-					:loading="checkins.insert.loading || timesheetDetailLoading"
+					:loading="checkins.insert.loading"
 					variant="solid"
 					class="w-full py-5 text-sm disabled:bg-gray-700"
 					:disabled="checkinDetailMissing"
@@ -127,6 +142,43 @@
 				>
 					{{ __("Confirm {0}", [nextAction.label]) }}
 				</Button>
+			</div>
+		</template>
+	</CustomIonModal>
+
+	<CustomIonModal :isOpen="isSubmitReviewOpen" @did-dismiss="isSubmitReviewOpen = false">
+		<template #actionSheet>
+			<div class="bg-white w-full flex flex-col pb-5">
+				<div class="w-full pt-8 pb-5 border-b text-center">
+					<span class="text-gray-900 font-bold text-lg">{{ __("Submit Timesheet?") }}</span>
+				</div>
+				<div class="w-full flex flex-col gap-4 p-4 max-h-[50vh] overflow-y-auto">
+					<div v-for="day in unconfirmedDays" :key="day.name">
+						<div class="flex flex-row justify-between text-sm font-semibold text-gray-900">
+							<span>{{ dayjs(day.start_date).format("ddd, D MMM YYYY") }}</span>
+							<span>{{ __("Total {0} h", [formatHours(day.total_hours)]) }}</span>
+						</div>
+						<SessionRow v-for="session in day.sessions" :key="session.name" :session="session" />
+					</div>
+				</div>
+				<div class="px-4 flex flex-col gap-3">
+					<p class="text-xs text-gray-600">
+						{{ __("It will be sent for approval automatically after midnight. Check-ins you add later on the same day are included.") }}
+					</p>
+					<div class="flex flex-row gap-3">
+						<Button variant="outline" class="w-full py-5 text-sm" @click="isSubmitReviewOpen = false">
+							{{ __("Cancel") }}
+						</Button>
+						<Button
+							variant="solid"
+							class="w-full py-5 text-sm"
+							:loading="submitTimesheetAction.loading"
+							@click="submitTimesheet"
+						>
+							{{ __("Yes, Submit") }}
+						</Button>
+					</div>
+				</div>
 			</div>
 		</template>
 	</CustomIonModal>
@@ -164,7 +216,7 @@
 
 <script setup>
 import { createListResource, createResource, toast, FeatherIcon } from "frappe-ui"
-import { computed, inject, ref, watch, onMounted, onBeforeUnmount } from "vue"
+import { computed, h, inject, ref, watch, onMounted, onBeforeUnmount } from "vue"
 
 import FormField from "@/components/FormField.vue"
 import CustomIonModal from "@/components/CustomIonModal.vue"
@@ -184,9 +236,8 @@ const longitude = ref(0)
 const locationStatus = ref("")
 const isModalOpen = ref(false)
 const timesheetDetail = ref({})
-const pendingTimesheet = ref(null)
-const timesheetDetailLoading = ref(false)
 const isTaskFilterOpen = ref(false)
+const isSubmitReviewOpen = ref(false)
 const taskDateFilter = ref({ from_date: null, to_date: null })
 
 // Filters the Task Link field's own options by when the task was created,
@@ -318,85 +369,114 @@ const lastLogType = computed(() => {
 	return lastLog?.value?.log_type === "IN" ? "check-in" : "check-out"
 })
 
+// Check In/Check Out and Submit Timesheet are driven by the server's own
+// state (voltamp_fca's employee_checkin_timesheet), not by the latest checkin
+// by time:
+// - open_session: the open Timesheet row (checked in, not checked out), if any.
+// - days: the employee's day Timesheets still in Draft, with their sessions
+//   and whether the employee already submitted (confirmed) them. A confirmed
+//   day stays Draft until the nightly job sends it for approval.
+const sessionState = createResource({
+	url: "voltamp_fca.voltamp_fca.employee_checkin_timesheet.get_work_session_state",
+	auto: true,
+})
+const openSession = computed(() => sessionState.data?.open_session || {})
+const isCheckedIn = computed(() => Boolean(openSession.value.detail_name))
+const draftDays = computed(() => sessionState.data?.days || [])
+const todayDay = computed(() => draftDays.value.find((day) => day.start_date === sessionState.data?.today))
+const unconfirmedDays = computed(() => draftDays.value.filter((day) => !day.employee_confirmed))
+const unconfirmedEarlierDays = computed(() =>
+	unconfirmedDays.value.filter((day) => day.start_date !== sessionState.data?.today)
+)
+
+function reloadSessions() {
+	sessionState.reload()
+	checkins.reload()
+}
+
 const nextAction = computed(() => {
-	return lastLog?.value?.log_type === "IN"
+	return isCheckedIn.value
 		? { action: "OUT", label: __("Check Out") }
 		: { action: "IN", label: __("Check In") }
 })
 
-// Once checked in (or checked out but not yet submitted), Activity Type/
-// Project/Task are locked to what was entered at check-in — only
-// Description stays editable for the checkout note.
-const isCycleActive = computed(() => lastLog.value?.log_type === "IN" || !!pendingTimesheet.value)
-
+// While checked in, Activity Type/Project/Task are locked to what was
+// entered at check-in — only Description stays editable for the checkout
+// note. Once checked out they're free again for the next session.
 function isFieldLocked(fieldname) {
-	return fieldname !== "description" && isCycleActive.value
+	return fieldname !== "description" && isCheckedIn.value
 }
 
-// Work Evidence needs a real Timesheet to attach to. While a cycle is
-// active (checked in, or checked out but not yet submitted) that's
-// lastLog.timesheet - the same Timesheet document the whole cycle through,
-// since handle_check_in/handle_check_out both reuse it rather than creating
-// a new one. Once the cycle ends (Submit Timesheet succeeds), lastLog.timesheet
-// still points at that now-submitted Timesheet forever after (Employee
-// Checkin rows aren't rewritten by submission) - it must NOT keep being
-// shown as "the" Work Evidence reference, or a finished Timesheet's old
-// evidence would appear to carry over into the next one. So outside of an
-// active cycle, fall back to preCheckinTimesheet - a fresh draft fetched/
-// created via get_or_create_active_timesheet below - instead.
-const activeTimesheet = computed(() => (isCycleActive.value ? lastLog.value?.timesheet : "") || preCheckinTimesheet.value || "")
-
-// Whether the current user may upload/delete Work Evidence on activeTimesheet
-// - real permission on that Timesheet (see WorkEvidenceSection's own
-// canWrite prop doc), not just "a timesheet is linked". Only meaningful
-// while a cycle is active (lastLog.timesheet is a real, possibly
-// permission-restricted Timesheet); outside of one, activeTimesheet is
-// always the user's own fresh draft, which they can always write to.
-const timesheetEvidencePermissions = createResource({ url: "frappe.client.get_doc_permissions" })
-const canEditTimesheetEvidence = computed(() => Boolean(timesheetEvidencePermissions.data?.permissions?.write))
-
+// When the open session changes (a Check In/Check Out just landed, or the
+// page was reopened):
+// - checked in: Description starts from the session row's saved note, to be
+//   added to/edited before Check Out saves it.
+// - checked out: that session is already saved, so start a blank form for
+//   the next session's Check In.
+// Only re-runs when the open session actually changes - socket list_update
+// reloads must not wipe what's being typed.
+let handledSessionKey = null
 watch(
-	() => (isCycleActive.value ? lastLog.value?.timesheet : ""),
-	(timesheetName) => {
-		if (timesheetName) {
-			timesheetEvidencePermissions.submit({ doctype: "Timesheet", docname: timesheetName })
+	() => [sessionState.data, openSession.value.detail_name || ""],
+	([data, sessionKey]) => {
+		if (!data || sessionKey === handledSessionKey) return
+		handledSessionKey = sessionKey
+
+		if (isCheckedIn.value) {
+			timesheetDetail.value = { description: openSession.value.description || "" }
+		} else {
+			timesheetDetail.value = {}
+			applyDefaultActivityType()
 		}
 	},
 	{ immediate: true }
 )
 
-// get_or_create_active_timesheet mirrors handle_check_in's own
-// get_or_create_draft_timesheet dedup (employee + today's date, excluding
-// a Timesheet already submitted for approval) - so the Timesheet fetched/
-// created here is the exact same one Check In later finds and appends a
-// time_log row to. Fetched whenever there's no cycle already active (a
-// fresh day before the first Check In, or right after Submit Timesheet
-// clears the previous cycle) so Work Evidence always has a live, writable,
-// evidence-free Timesheet to attach to.
+// Work Evidence attaches to today's day Timesheet - the same draft Check In
+// appends its rows to (get_or_create_active_timesheet creates it empty
+// before the first Check In of the day), so evidence added at any point
+// stays with that day's Timesheet.
 const activeTimesheetAction = createResource({
 	url: "voltamp_fca.voltamp_fca.employee_checkin_timesheet.get_or_create_active_timesheet",
 })
-const preCheckinTimesheet = ref("")
+const todayTimesheet = ref("")
 
 watch(
-	() => [checkins.list.loading, isCycleActive.value, settings.data?.allow_employee_checkin_from_mobile_app],
-	([loading, cycleActive, checkinEnabled]) => {
-		// Wait for the checkin list to settle so an active cycle's own real
-		// Timesheet (lastLog.timesheet) always wins over creating a new one.
-		if (loading || cycleActive || !checkinEnabled) return
-		if (preCheckinTimesheet.value || activeTimesheetAction.loading) return
-
+	() => settings.data?.allow_employee_checkin_from_mobile_app,
+	(checkinEnabled) => {
+		if (!checkinEnabled || todayTimesheet.value || activeTimesheetAction.loading) return
 		activeTimesheetAction.submit(
 			{},
 			{
 				onSuccess(name) {
-					preCheckinTimesheet.value = name
+					todayTimesheet.value = name
 				},
 			}
 		)
 	},
 	{ immediate: true }
 )
+
+const SessionRow = (props) =>
+	h("div", { class: "flex flex-row justify-between gap-2 mt-1.5 text-sm text-gray-600" }, [
+		h("div", { class: "flex flex-col min-w-0" }, [
+			h(
+				"span",
+				`${dayjs(props.session.from_time).format("hh:mm a")} → ${
+					props.session.to_time ? dayjs(props.session.to_time).format("hh:mm a") : __("Now")
+				}`
+			),
+			props.session.task_name || props.session.task
+				? h("span", { class: "text-xs text-gray-500 truncate" }, props.session.task_name || props.session.task)
+				: null,
+		]),
+		h("span", { class: "shrink-0" }, props.session.to_time ? `${formatHours(props.session.hours)} h` : "—"),
+	])
+SessionRow.props = ["session"]
+
+function formatHours(hours) {
+	return Number(hours || 0).toFixed(2)
+}
 
 // Activity Type/Project/Task/Description must all be filled before a fresh Check In.
 const checkinDetailMissing = computed(() => {
@@ -424,9 +504,8 @@ const timesheetFields = createResource({
 })
 timesheetFields.reload()
 
-const timesheetDocstatus = createResource({ url: "frappe.client.get_value" })
 const submitTimesheetAction = createResource({
-	url: "voltamp_fca.voltamp_fca.employee_checkin_timesheet.submit_linked_timesheet",
+	url: "voltamp_fca.voltamp_fca.employee_checkin_timesheet.submit_timesheet",
 })
 const timesheetDoc = createResource({ url: "frappe.client.get" })
 const saveTimesheetDoc = createResource({ url: "frappe.client.save" })
@@ -465,99 +544,6 @@ function saveTimesheetDescription(timesheetName, description, rowName, onDone) {
 		}
 	)
 }
-
-// Whenever the last log changes (a new checkin/checkout just landed),
-// auto-fill Description with whatever is already saved on the Timesheet row
-// so far, so it can be freely added to or edited — it never resets to blank
-// while a cycle is active. Only a genuinely fresh cycle (no linked
-// timesheet yet) starts blank.
-//
-// checkins.list.loading is checked and skipped here on purpose: the moment
-// any reload of the checkin list starts (including the automatic one
-// frappe-ui fires right after an insert succeeds), lastLog briefly reports
-// nothing at all while the fetch is in flight. Reacting to that transient
-// "nothing" as if it were a genuine fresh cycle wiped real descriptions —
-// so only ever act once loading has actually settled.
-watch(
-	() => [checkins.list.loading, lastLog.value?.name],
-	([loading]) => {
-		if (loading) return
-
-		const timesheetName = lastLog.value?.timesheet
-
-		if (!timesheetName) {
-			timesheetDetail.value = {}
-			applyDefaultActivityType()
-			timesheetDetailLoading.value = false
-			return
-		}
-
-		// Block Check In/Check Out (see the disabled/loading bindings on those
-		// buttons) until this resolves — submitting before it lands would save
-		// a blank description over the real one (a real bug we hit once).
-		timesheetDetailLoading.value = true
-
-		timesheetDoc.submit(
-			{ doctype: "Timesheet", name: timesheetName },
-			{
-				onSuccess(doc) {
-					timesheetDetailLoading.value = false
-
-					// Once this Timesheet is submitted, the cycle it belongs to is
-					// done — checked via this same fetch's docstatus (not a
-					// separately-timed check) so there's no race between two
-					// independent async lookups deciding this differently.
-					if (doc.docstatus !== 0) {
-						timesheetDetail.value = { ...timesheetDetail.value, description: "" }
-						return
-					}
-
-					const row = findTimesheetRow(doc, lastLog.value?.timesheet_detail)
-					timesheetDetail.value = { ...timesheetDetail.value, description: row?.description || "" }
-				},
-				onError() {
-					timesheetDetailLoading.value = false
-				},
-			}
-		)
-	},
-	{ immediate: true }
-)
-
-// Recompute whether the last OUT's Timesheet is still awaiting the "Submit
-// Timesheet" click, so that button's state survives a page reload, not just
-// this session.
-//
-// docstatus alone can't tell this apart: voltamp_fca's Timesheet Approval
-// workflow only reaches docstatus 1 at "Approved" - clicking Submit
-// Timesheet just moves Draft -> Pending Approval, which is still docstatus
-// 0. Checking docstatus alone would keep re-offering "Submit Timesheet"
-// forever after it was already clicked, blocking the next Check In. So this
-// also needs workflow_state, to distinguish "still Draft" from "already
-// submitted, awaiting a Project Manager's approval".
-watch(
-	() => [lastLog.value?.log_type, lastLog.value?.timesheet],
-	([logType, timesheetName]) => {
-		if (logType !== "OUT" || !timesheetName) {
-			pendingTimesheet.value = null
-			return
-		}
-
-		timesheetDocstatus.submit(
-			{ doctype: "Timesheet", filters: { name: timesheetName }, fieldname: ["docstatus", "workflow_state"] },
-			{
-				onSuccess(data) {
-					const stillDraft = data?.docstatus === 0 && data?.workflow_state !== "Pending Approval"
-					pendingTimesheet.value = stillDraft ? timesheetName : null
-				},
-				onError() {
-					pendingTimesheet.value = null
-				},
-			}
-		)
-	},
-	{ immediate: true }
-)
 
 function handleLocationSuccess(position) {
 	latitude.value = position.coords.latitude
@@ -610,9 +596,7 @@ function showErrorToasts(error, actionLabel) {
 const submitLog = (logType) => {
 	const actionLabel = logType === "IN" ? __("Check-in") : __("Check-out")
 
-	// Snapshot now, before the insert call triggers any reactive side effects
-	// (including frappe-ui's own automatic list reload) that could otherwise
-	// touch timesheetDetail before we get to use this value below.
+	// Snapshot now, before the insert call triggers any reactive side effects.
 	const descriptionAtSubmitTime = timesheetDetail.value.description
 
 	// At OUT, description is intentionally left out of the insert payload —
@@ -623,9 +607,9 @@ const submitLog = (logType) => {
 		logType === "IN"
 			? timesheetDetail.value
 			: {
-					activity_type: lastLog.value?.activity_type,
-					project: lastLog.value?.project,
-					task: lastLog.value?.task,
+					activity_type: openSession.value.activity_type,
+					project: openSession.value.project,
+					task: openSession.value.task,
 				}
 
 	checkins.insert.submit(
@@ -642,7 +626,7 @@ const submitLog = (logType) => {
 				isModalOpen.value = false
 
 				const finish = () => {
-					checkins.reload()
+					reloadSessions()
 					toast({
 						title: __("Success"),
 						text: __("{0} successful!", [actionLabel]),
@@ -660,24 +644,44 @@ const submitLog = (logType) => {
 			},
 			onError(error) {
 				showErrorToasts(error, actionLabel)
+				sessionState.reload()
 			},
 		}
 	)
 }
 
+// Submit Timesheet is independent of Check In/Check Out: enabled whenever
+// there's a day to submit, and while checked in - so clicking it then can
+// explain why it won't submit yet.
+const canSubmitTimesheet = computed(() => isCheckedIn.value || unconfirmedDays.value.length > 0)
+
+function handleSubmitTimesheet() {
+	if (isCheckedIn.value) {
+		toast({
+			title: __("Checkout Pending"),
+			text: __("Checkout is pending. Please check out before submitting the timesheet."),
+			icon: "alert-circle",
+			position: "bottom-center",
+			iconClasses: "text-red-500",
+		})
+		return
+	}
+
+	isSubmitReviewOpen.value = true
+}
+
+// Confirms every day listed in the review popup. The Timesheets stay Draft;
+// voltamp_fca's nightly job sends them for approval once their day is over.
 function submitTimesheet() {
 	submitTimesheetAction.submit(
-		{ employee_checkin: lastLog.value.name },
+		{},
 		{
 			onSuccess() {
-				pendingTimesheet.value = null
-				preCheckinTimesheet.value = ""
-				timesheetDetail.value = {}
-				applyDefaultActivityType()
-				checkins.reload()
+				isSubmitReviewOpen.value = false
+				reloadSessions()
 				toast({
 					title: __("Success"),
-					text: __("Timesheet submitted successfully!"),
+					text: __("Timesheet submitted. It will be sent for approval after midnight."),
 					icon: "check-circle",
 					position: "bottom-center",
 					iconClasses: "text-green-500",
@@ -685,24 +689,9 @@ function submitTimesheet() {
 			},
 			onError(error) {
 				showErrorToasts(error, __("Timesheet submission"))
+				sessionState.reload()
 			},
 		}
-	)
-}
-
-function handleSubmitTimesheet() {
-	if (!pendingTimesheet.value) {
-		submitTimesheet()
-		return
-	}
-
-	// Save whatever is currently in the field (already auto-filled with the
-	// existing text, plus any edits) as the final description, then submit.
-	saveTimesheetDescription(
-		pendingTimesheet.value,
-		timesheetDetail.value.description,
-		lastLog.value?.timesheet_detail,
-		submitTimesheet
 	)
 }
 
@@ -710,7 +699,7 @@ onMounted(() => {
 	socket.emit("doctype_subscribe", DOCTYPE)
 	socket.on("list_update", (data) => {
 		if (data.doctype == DOCTYPE) {
-			checkins.reload()
+			reloadSessions()
 		}
 	})
 })
