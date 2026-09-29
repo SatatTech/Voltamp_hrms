@@ -55,9 +55,16 @@ def employee_query_for_attendance_request(
 	# also carries the plain Employee role to just their own record. The role
 	# check above is the real authorization here, so deliberately bypass that
 	# with get_all instead.
+	# A Projects Manager may not file their own Backdated Timesheet (see
+	# voltamp_fca's validate_projects_manager_self_request), so leave them out.
+	filters = {"status": "Active"}
+	own_employee = frappe.db.get_value("Employee", {"user_id": frappe.session.user}, "name")
+	if own_employee:
+		filters["name"] = ["!=", own_employee]
+
 	return frappe.get_all(
 		"Employee",
-		filters={"status": "Active"},
+		filters=filters,
 		or_filters=[
 			["name", "like", f"%{txt}%"],
 			["employee_name", "like", f"%{txt}%"],

@@ -10,7 +10,7 @@
 				variant="outline"
 				iconLeft="mic"
 				class="flex-1 py-5 text-sm rounded"
-				:disabled="isUploading || !hasReference"
+				:disabled="isUploading || !canAttach"
 				@click="openRecorder"
 			>
 				{{ __("Voice Note") }}
@@ -20,7 +20,7 @@
 				variant="outline"
 				iconLeft="camera"
 				class="flex-1 py-5 text-sm rounded"
-				:disabled="isUploading || !hasReference"
+				:disabled="isUploading || !canAttach"
 				@click="triggerPhotoPicker"
 			>
 				{{ __("Upload Photo") }}
@@ -37,7 +37,7 @@
 			/>
 		</div>
 
-		<p v-if="canWrite && !hasReference && emptyReferenceHint" class="text-xs text-gray-400">
+		<p v-if="canWrite && !canAttach && emptyReferenceHint" class="text-xs text-gray-400">
 			{{ emptyReferenceHint }}
 		</p>
 
@@ -120,6 +120,15 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	// Optional async function returning a referenceName, called on the first
+	// upload while referenceName is still empty - lets a caller create the
+	// record only once there's actually evidence to attach (e.g.
+	// CheckInPanel.vue's day Timesheet), instead of up front. The caller is
+	// expected to then pass the created name back in as referenceName.
+	ensureReference: {
+		type: Function,
+		default: null,
+	},
 })
 
 const photoInput = ref(null)
@@ -129,6 +138,7 @@ const uploadStatus = ref(null)
 const inFlightUploads = ref(0)
 const isUploading = computed(() => inFlightUploads.value > 0)
 const hasReference = computed(() => Boolean(props.referenceName))
+const canAttach = computed(() => hasReference.value || Boolean(props.ensureReference))
 
 // Cheap, attachment-free counts for the compact summary - never the
 // paginated evidence list itself (see get_evidence_counts on the server).
@@ -149,12 +159,12 @@ function reloadCounts() {
 watch(() => [props.referenceDoctype, props.referenceName], reloadCounts, { immediate: true })
 
 function openRecorder() {
-	if (isUploading.value || !hasReference.value) return
+	if (isUploading.value || !canAttach.value) return
 	isRecorderOpen.value = true
 }
 
 function triggerPhotoPicker() {
-	if (isUploading.value || !hasReference.value) return
+	if (isUploading.value || !canAttach.value) return
 	photoInput.value?.click()
 }
 
@@ -177,9 +187,10 @@ async function upload(blob, evidenceType, filename) {
 	uploadStatus.value = { message: __("Uploading {0}…", [filename]), done: false, error: false }
 
 	try {
+		const referenceName = props.referenceName || (await props.ensureReference())
 		await uploadWorkEvidence({
 			referenceDoctype: props.referenceDoctype,
-			referenceName: props.referenceName,
+			referenceName,
 			evidenceType,
 			blob,
 			filename,

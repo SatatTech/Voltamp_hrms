@@ -43,7 +43,12 @@
 						referenceDoctype="Timesheet"
 						:referenceName="attendanceRequest.timesheet || ''"
 						:canWrite="!attendanceRequest.timesheet || canEditTimesheetEvidence"
-						:emptyReferenceHint="__('Pick a From Date to start adding Work Evidence')"
+						:ensureReference="canCreateEvidenceTimesheet ? ensureEvidenceTimesheet : null"
+						:emptyReferenceHint="
+							canCreateForOthers
+								? __('Pick From Date and Employee to start adding Work Evidence')
+								: __('Pick a From Date to start adding Work Evidence')
+						"
 					/>
 				</template>
 			</FormView>
@@ -107,14 +112,14 @@ const dayjs = inject("$dayjs")
 // re-checks this independently, so this is UX only, not the enforcement.
 const canCreateForOthers = computed(() => Boolean(user.data?.roles?.includes("Projects Manager")))
 
-// A Backdated Timesheet's applicable date is From Date. It must not be a
-// future date, and only within a 36-hour window of that date/time - past
-// that, it can no longer be created. This
-// is a client-side mirror of the server-side check (the authoritative
-// enforcement lives in voltamp_fca's Attendance Request validate hook) so
-// the user gets immediate, specific feedback instead of a round-trip.
-// Scoped to fresh creation only (!props.id) - editing/resubmitting an
-// already-created request isn't affected by this rule.
+// A Backdated Timesheet's From/To Date must not be a future date. Anyone
+// other than a Projects Manager is also held to a 36-hour window of From
+// Date - a Projects Manager may backdate any number of days, but never for
+// their own Employee. This is a client-side mirror of the server-side checks
+// (the authoritative enforcement lives in voltamp_fca's Attendance Request
+// validate hooks) so the user gets immediate, specific feedback instead of a
+// round-trip. Scoped to fresh creation only (!props.id) - editing/
+// resubmitting an already-created request isn't affected by these rules.
 const BACKDATED_WINDOW_HOURS = 36
 
 const props = defineProps({
@@ -302,39 +307,49 @@ watch(
 // Work Evidence (Voice Note/Upload Photo) needs a real Timesheet to attach
 // to - rather than making the user Submit this whole Attendance Request
 // first just to unlock that, get_or_create_backdated_timesheet_for_evidence
-// hands back a draft Timesheet for employee+From Date as soon as both are
-// known, same as CheckInPanel.vue does before the first real-time Check In.
-// create_and_submit_timesheet (the actual Submit's on_submit hook) later
-// adopts this exact same draft, so anything attached here carries through.
+// hands back a draft Timesheet for employee+From Date. It's only called on
+// the first upload (see WorkEvidenceSection's ensureReference), not as soon
+// as a date is picked - so filling in the form never leaves an empty
+// Timesheet behind. create_and_submit_timesheet (the actual Submit's
+// on_submit hook) later adopts this exact same draft, so anything attached
+// here carries through.
 const preSubmitTimesheetAction = createResource({
 	url: "voltamp_fca.voltamp_fca.attendance_request_timesheet.get_or_create_backdated_timesheet_for_evidence",
 })
 
-let preSubmitTimesheetKey = ""
+const evidenceEmployee = computed(() =>
+	// A Projects Manager must pick the Employee first - never fall back to
+	// their own, which they may not file for.
+	canCreateForOthers.value ? attendanceRequest.value.employee : activityTypeEmployee.value
+)
+const canCreateEvidenceTimesheet = computed(
+	() =>
+		!props.id &&
+		Boolean(attendanceRequest.value.from_date) &&
+		Boolean(evidenceEmployee.value) &&
+		!(canCreateForOthers.value && evidenceEmployee.value === employee.data.name)
+)
 
+function ensureEvidenceTimesheet() {
+	return preSubmitTimesheetAction
+		.submit({
+			employee: evidenceEmployee.value,
+			from_date: dayjs(attendanceRequest.value.from_date).format("YYYY-MM-DD"),
+		})
+		.then((name) => {
+			attendanceRequest.value.timesheet = name
+			return name
+		})
+}
+
+// Evidence belongs to one Employee's day - if either changes on a new form,
+// the next upload finds/creates the Timesheet for the new pair instead.
 watch(
-	() => [
-		attendanceRequest.value.docstatus,
-		attendanceRequest.value.from_date,
-		activityTypeEmployee.value,
-	],
-	([docstatus, from_date, employeeId]) => {
-		// Once actually Submitted/Cancelled, `timesheet` is the real, final one
-		// set by create_and_submit_timesheet - never speculatively touch it again.
-		if (docstatus === 1 || docstatus === 2) return
-		if (!from_date || !employeeId) return
-
-		const day = dayjs(from_date).format("YYYY-MM-DD")
-		const key = `${employeeId}:${day}`
-		if (key === preSubmitTimesheetKey) return
-		preSubmitTimesheetKey = key
-
-		preSubmitTimesheetAction.submit(
-			{ employee: employeeId, from_date: day },
-			{ onSuccess: (name) => (attendanceRequest.value.timesheet = name) }
-		)
-	},
-	{ immediate: true }
+	() => [evidenceEmployee.value, attendanceRequest.value.from_date && dayjs(attendanceRequest.value.from_date).format("YYYY-MM-DD")],
+	(current, previous) => {
+		if (props.id || !previous || current.join() === previous.join()) return
+		attendanceRequest.value.timesheet = ""
+	}
 )
 
 // Whether the current user may upload/delete Work Evidence on this Backdated
@@ -405,6 +420,11 @@ watch(
 	([from_date, to_date]) => {
 		validateDates(from_date, to_date)
 	}
+)
+
+watch(
+	() => attendanceRequest.value.employee,
+	(employee_id) => validateEmployee(employee_id)
 )
 
 watch(
@@ -561,10 +581,11 @@ function validateDates(from_date, to_date) {
 	// the 36-hour window has since passed.
 	if (!props.id && from_date) {
 		const from = dayjs(from_date)
+		const endOfToday = dayjs().endOf("day")
 
-		if (from.isAfter(dayjs().endOf("day"))) {
+		if (from.isAfter(endOfToday) || (to_date && dayjs(to_date).isAfter(endOfToday))) {
 			error_message = __("Backdated Timesheet cannot be created for a future date.")
-		} else if (dayjs().isAfter(from.add(BACKDATED_WINDOW_HOURS, "hour"))) {
+		} else if (!canCreateForOthers.value && dayjs().isAfter(from.add(BACKDATED_WINDOW_HOURS, "hour"))) {
 			error_message = __(
 				"Backdated Timesheet can only be created within 36 hours of the applicable date/time. The allowed time window has expired."
 			)
@@ -578,13 +599,27 @@ function validateDates(from_date, to_date) {
 	from_date_field.error_message = error_message
 }
 
+// A Projects Manager files Backdated Timesheets for others only - never
+// their own (the server rejects that too).
+function validateEmployee(employee_id) {
+	if (props.id || !canCreateForOthers.value) return
+	const employeeField = formFields.data?.find((field) => field.fieldname === "employee")
+	if (!employeeField) return
+
+	employeeField.error_message =
+		employee_id && employee_id === employee.data.name
+			? __("You cannot create your own Backdated Timesheet. Please ask your Reports To Manager.")
+			: ""
+}
+
 function validateForm() {
-	// A manager creating this on behalf of another employee will have already
-	// set this via the Employee field - only default to "self" when it's
-	// still unset (the normal case, where that field isn't even shown).
-	if (!attendanceRequest.value.employee) {
+	// A Projects Manager picks the Employee themselves (and may not pick
+	// their own) - only default to "self" for everyone else, where that
+	// field isn't even shown.
+	if (!attendanceRequest.value.employee && !canCreateForOthers.value) {
 		attendanceRequest.value.employee = employee.data.name
 	}
+	validateEmployee(attendanceRequest.value.employee)
 
 	// Re-run right before submit, not just reactively on field change - the
 	// 36-hour window can expire purely from time passing while the form
