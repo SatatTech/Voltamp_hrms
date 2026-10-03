@@ -44,23 +44,8 @@
 				referenceDoctype="Timesheet"
 				:referenceName="todayTimesheet"
 				:canWrite="true"
-				:emptyReferenceHint="__('Preparing Work Evidence…')"
+				:ensureReference="ensureTodayTimesheet"
 			/>
-
-			<div v-if="todayDay" class="mt-3 rounded border border-gray-200 px-3 py-2.5">
-				<div class="flex flex-row justify-between text-sm font-semibold text-gray-900">
-					<span>{{ __("Today's Sessions ({0})", [todayDay.sessions.length]) }}</span>
-					<span>{{ __("Total {0} h", [formatHours(todayDay.total_hours)]) }}</span>
-				</div>
-				<SessionRow v-for="session in todayDay.sessions" :key="session.name" :session="session" />
-				<div v-if="todayDay.employee_confirmed" class="mt-2 text-xs font-medium text-green-700">
-					{{ __("Submitted. It will be sent for approval after midnight - sessions you add later today are included.") }}
-				</div>
-			</div>
-
-			<div v-if="unconfirmedEarlierDays.length" class="mt-2 text-xs font-medium text-orange-700">
-				{{ __("{0} earlier day(s) not submitted yet.", [unconfirmedEarlierDays.length]) }}
-			</div>
 
 			<div class="flex flex-row gap-3 mt-4 mb-1">
 				<Button
@@ -76,18 +61,6 @@
 						/>
 					</template>
 					{{ nextAction.label }}
-				</Button>
-
-				<Button
-					class="w-full drop-shadow-sm py-5 text-base disabled:bg-gray-700"
-					:loading="submitTimesheetAction.loading"
-					:disabled="!canSubmitTimesheet"
-					@click="handleSubmitTimesheet"
-				>
-					<template #prefix>
-						<FeatherIcon name="check-circle" class="w-4" />
-					</template>
-					{{ __("Submit Timesheet") }}
 				</Button>
 			</div>
 		</template>
@@ -146,43 +119,6 @@
 		</template>
 	</CustomIonModal>
 
-	<CustomIonModal :isOpen="isSubmitReviewOpen" @did-dismiss="isSubmitReviewOpen = false">
-		<template #actionSheet>
-			<div class="bg-white w-full flex flex-col pb-5">
-				<div class="w-full pt-8 pb-5 border-b text-center">
-					<span class="text-gray-900 font-bold text-lg">{{ __("Submit Timesheet?") }}</span>
-				</div>
-				<div class="w-full flex flex-col gap-4 p-4 max-h-[50vh] overflow-y-auto">
-					<div v-for="day in unconfirmedDays" :key="day.name">
-						<div class="flex flex-row justify-between text-sm font-semibold text-gray-900">
-							<span>{{ dayjs(day.start_date).format("ddd, D MMM YYYY") }}</span>
-							<span>{{ __("Total {0} h", [formatHours(day.total_hours)]) }}</span>
-						</div>
-						<SessionRow v-for="session in day.sessions" :key="session.name" :session="session" />
-					</div>
-				</div>
-				<div class="px-4 flex flex-col gap-3">
-					<p class="text-xs text-gray-600">
-						{{ __("It will be sent for approval automatically after midnight. Check-ins you add later on the same day are included.") }}
-					</p>
-					<div class="flex flex-row gap-3">
-						<Button variant="outline" class="w-full py-5 text-sm" @click="isSubmitReviewOpen = false">
-							{{ __("Cancel") }}
-						</Button>
-						<Button
-							variant="solid"
-							class="w-full py-5 text-sm"
-							:loading="submitTimesheetAction.loading"
-							@click="submitTimesheet"
-						>
-							{{ __("Yes, Submit") }}
-						</Button>
-					</div>
-				</div>
-			</div>
-		</template>
-	</CustomIonModal>
-
 	<CustomIonModal :isOpen="isTaskFilterOpen" @did-dismiss="isTaskFilterOpen = false">
 		<template #actionSheet>
 			<div class="bg-white w-full flex flex-col items-center pb-5">
@@ -216,7 +152,7 @@
 
 <script setup>
 import { createListResource, createResource, toast, FeatherIcon } from "frappe-ui"
-import { computed, h, inject, ref, watch, onMounted, onBeforeUnmount } from "vue"
+import { computed, inject, ref, watch, onMounted, onBeforeUnmount } from "vue"
 
 import FormField from "@/components/FormField.vue"
 import CustomIonModal from "@/components/CustomIonModal.vue"
@@ -237,7 +173,6 @@ const locationStatus = ref("")
 const isModalOpen = ref(false)
 const timesheetDetail = ref({})
 const isTaskFilterOpen = ref(false)
-const isSubmitReviewOpen = ref(false)
 const taskDateFilter = ref({ from_date: null, to_date: null })
 
 // Filters the Task Link field's own options by when the task was created,
@@ -369,25 +304,15 @@ const lastLogType = computed(() => {
 	return lastLog?.value?.log_type === "IN" ? "check-in" : "check-out"
 })
 
-// Check In/Check Out and Submit Timesheet are driven by the server's own
-// state (voltamp_fca's employee_checkin_timesheet), not by the latest checkin
-// by time:
+// Check In/Check Out is driven by the server's own state (voltamp_fca's
+// employee_checkin_timesheet), not by the latest checkin by time:
 // - open_session: the open Timesheet row (checked in, not checked out), if any.
-// - days: the employee's day Timesheets still in Draft, with their sessions
-//   and whether the employee already submitted (confirmed) them. A confirmed
-//   day stays Draft until the nightly job sends it for approval.
 const sessionState = createResource({
 	url: "voltamp_fca.voltamp_fca.employee_checkin_timesheet.get_work_session_state",
 	auto: true,
 })
 const openSession = computed(() => sessionState.data?.open_session || {})
 const isCheckedIn = computed(() => Boolean(openSession.value.detail_name))
-const draftDays = computed(() => sessionState.data?.days || [])
-const todayDay = computed(() => draftDays.value.find((day) => day.start_date === sessionState.data?.today))
-const unconfirmedDays = computed(() => draftDays.value.filter((day) => !day.employee_confirmed))
-const unconfirmedEarlierDays = computed(() =>
-	unconfirmedDays.value.filter((day) => day.start_date !== sessionState.data?.today)
-)
 
 function reloadSessions() {
 	sessionState.reload()
@@ -433,9 +358,14 @@ watch(
 )
 
 // Work Evidence attaches to today's day Timesheet - the same draft Check In
-// appends its rows to (get_or_create_active_timesheet creates it empty
-// before the first Check In of the day), so evidence added at any point
-// stays with that day's Timesheet.
+// appends its rows to, so evidence added at any point stays with that day's
+// Timesheet. Opening the app only looks it up; it's created (empty) only
+// when evidence is added before the first Check In of the day - otherwise
+// every app open on a day without work would leave an empty Timesheet.
+// "Today" is the device's clock, the same one Check In's time comes from.
+const activeTimesheetLookup = createResource({
+	url: "voltamp_fca.voltamp_fca.employee_checkin_timesheet.get_active_timesheet",
+})
 const activeTimesheetAction = createResource({
 	url: "voltamp_fca.voltamp_fca.employee_checkin_timesheet.get_or_create_active_timesheet",
 })
@@ -444,12 +374,12 @@ const todayTimesheet = ref("")
 watch(
 	() => settings.data?.allow_employee_checkin_from_mobile_app,
 	(checkinEnabled) => {
-		if (!checkinEnabled || todayTimesheet.value || activeTimesheetAction.loading) return
-		activeTimesheetAction.submit(
-			{},
+		if (!checkinEnabled || todayTimesheet.value) return
+		activeTimesheetLookup.submit(
+			{ local_time: dayjs().format("YYYY-MM-DD HH:mm:ss") },
 			{
 				onSuccess(name) {
-					todayTimesheet.value = name
+					if (name && !todayTimesheet.value) todayTimesheet.value = name
 				},
 			}
 		)
@@ -457,25 +387,23 @@ watch(
 	{ immediate: true }
 )
 
-const SessionRow = (props) =>
-	h("div", { class: "flex flex-row justify-between gap-2 mt-1.5 text-sm text-gray-600" }, [
-		h("div", { class: "flex flex-col min-w-0" }, [
-			h(
-				"span",
-				`${dayjs(props.session.from_time).format("hh:mm a")} → ${
-					props.session.to_time ? dayjs(props.session.to_time).format("hh:mm a") : __("Now")
-				}`
-			),
-			props.session.task_name || props.session.task
-				? h("span", { class: "text-xs text-gray-500 truncate" }, props.session.task_name || props.session.task)
-				: null,
-		]),
-		h("span", { class: "shrink-0" }, props.session.to_time ? `${formatHours(props.session.hours)} h` : "—"),
-	])
-SessionRow.props = ["session"]
-
-function formatHours(hours) {
-	return Number(hours || 0).toFixed(2)
+// Shared across uploads started together (several photos picked at once),
+// so they all attach to the one Timesheet created for them.
+let pendingTodayTimesheet = null
+function ensureTodayTimesheet() {
+	if (todayTimesheet.value) return Promise.resolve(todayTimesheet.value)
+	if (!pendingTodayTimesheet) {
+		pendingTodayTimesheet = activeTimesheetAction
+			.submit({ local_time: dayjs().format("YYYY-MM-DD HH:mm:ss") })
+			.then((name) => {
+				todayTimesheet.value = name
+				return name
+			})
+			.finally(() => {
+				pendingTodayTimesheet = null
+			})
+	}
+	return pendingTodayTimesheet
 }
 
 // Activity Type/Project/Task/Description must all be filled before a fresh Check In.
@@ -504,9 +432,6 @@ const timesheetFields = createResource({
 })
 timesheetFields.reload()
 
-const submitTimesheetAction = createResource({
-	url: "voltamp_fca.voltamp_fca.employee_checkin_timesheet.submit_timesheet",
-})
 const timesheetDoc = createResource({ url: "frappe.client.get" })
 const saveTimesheetDoc = createResource({ url: "frappe.client.save" })
 
@@ -624,6 +549,10 @@ const submitLog = (logType) => {
 		{
 			onSuccess(doc) {
 				isModalOpen.value = false
+				// First Check In of the day just created the day's Timesheet.
+				if (logType === "IN" && doc.timesheet && !todayTimesheet.value) {
+					todayTimesheet.value = doc.timesheet
+				}
 
 				const finish = () => {
 					reloadSessions()
@@ -644,51 +573,6 @@ const submitLog = (logType) => {
 			},
 			onError(error) {
 				showErrorToasts(error, actionLabel)
-				sessionState.reload()
-			},
-		}
-	)
-}
-
-// Submit Timesheet is independent of Check In/Check Out: enabled whenever
-// there's a day to submit, and while checked in - so clicking it then can
-// explain why it won't submit yet.
-const canSubmitTimesheet = computed(() => isCheckedIn.value || unconfirmedDays.value.length > 0)
-
-function handleSubmitTimesheet() {
-	if (isCheckedIn.value) {
-		toast({
-			title: __("Checkout Pending"),
-			text: __("Checkout is pending. Please check out before submitting the timesheet."),
-			icon: "alert-circle",
-			position: "bottom-center",
-			iconClasses: "text-red-500",
-		})
-		return
-	}
-
-	isSubmitReviewOpen.value = true
-}
-
-// Confirms every day listed in the review popup. The Timesheets stay Draft;
-// voltamp_fca's nightly job sends them for approval once their day is over.
-function submitTimesheet() {
-	submitTimesheetAction.submit(
-		{},
-		{
-			onSuccess() {
-				isSubmitReviewOpen.value = false
-				reloadSessions()
-				toast({
-					title: __("Success"),
-					text: __("Timesheet submitted. It will be sent for approval after midnight."),
-					icon: "check-circle",
-					position: "bottom-center",
-					iconClasses: "text-green-500",
-				})
-			},
-			onError(error) {
-				showErrorToasts(error, __("Timesheet submission"))
 				sessionState.reload()
 			},
 		}
