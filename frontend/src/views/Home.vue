@@ -19,10 +19,11 @@ import BaseLayout from "@/components/BaseLayout.vue"
 import RequestPanel from "@/components/RequestPanel.vue"
 import AttendanceIcon from "@/components/icons/AttendanceIcon.vue"
 import ShiftIcon from "@/components/icons/ShiftIcon.vue"
-import LeaveIcon from "@/components/icons/LeaveIcon.vue"
+// Request Leave / View Salary Slips quick links are hidden for now.
+// import LeaveIcon from "@/components/icons/LeaveIcon.vue"
 import ExpenseIcon from "@/components/icons/ExpenseIcon.vue"
 import EmployeeAdvanceIcon from "@/components/icons/EmployeeAdvanceIcon.vue"
-import SalaryIcon from "@/components/icons/SalaryIcon.vue"
+// import SalaryIcon from "@/components/icons/SalaryIcon.vue"
 import TaskIcon from "@/components/icons/TaskIcon.vue"
 
 const __ = inject("$translate")
@@ -60,11 +61,11 @@ const quickLinks = computed(() => {
 			title: __("Request a Shift"),
 			route: "ShiftRequestFormView",
 		},
-		{
-			icon: markRaw(LeaveIcon),
-			title: __("Request Leave"),
-			route: "LeaveApplicationFormView",
-		},
+		// {
+		// 	icon: markRaw(LeaveIcon),
+		// 	title: __("Request Leave"),
+		// 	route: "LeaveApplicationFormView",
+		// },
 		{
 			icon: markRaw(ExpenseIcon),
 			title: __("Claim an Expense"),
@@ -74,12 +75,12 @@ const quickLinks = computed(() => {
 			icon: markRaw(EmployeeAdvanceIcon),
 			title: __("Request an Advance"),
 			route: "EmployeeAdvanceFormView",
-		},
-		{
-			icon: markRaw(SalaryIcon),
-			title: __("View Salary Slips"),
-			route: "SalarySlipsDashboard",
 		}
+		// {
+		// 	icon: markRaw(SalaryIcon),
+		// 	title: __("View Salary Slips"),
+		// 	route: "SalarySlipsDashboard",
+		// }
 	)
 
 	return links
