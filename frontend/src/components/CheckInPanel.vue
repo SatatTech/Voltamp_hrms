@@ -332,6 +332,12 @@ function isFieldLocked(fieldname) {
 	return fieldname !== "description" && isCheckedIn.value
 }
 
+// Latest open assigned Task, preselected on a fresh Check In form (see
+// applyDefaultTask below).
+const defaultTask = createResource({
+	url: "voltamp_fca.voltamp_fca.permission.task.get_default_checkin_task",
+})
+
 // When the open session changes (a Check In/Check Out just landed, or the
 // page was reopened):
 // - checked in: Description starts from the session row's saved note, to be
@@ -352,10 +358,27 @@ watch(
 		} else {
 			timesheetDetail.value = {}
 			applyDefaultActivityType()
+			applyDefaultTask()
 		}
 	},
 	{ immediate: true }
 )
+
+// Preselect the employee's latest open assigned Task on a fresh Check In
+// form - the Task watcher above then fills Project as usual. Never replaces
+// a Task the user has already picked, and stays empty if there's none.
+function applyDefaultTask() {
+	defaultTask.submit(
+		{ local_time: dayjs().format("YYYY-MM-DD HH:mm:ss") },
+		{
+			onSuccess(task) {
+				if (task && !isCheckedIn.value && !timesheetDetail.value.task) {
+					timesheetDetail.value = { ...timesheetDetail.value, task }
+				}
+			},
+		}
+	)
+}
 
 // Work Evidence attaches to today's day Timesheet - the same draft Check In
 // appends its rows to, so evidence added at any point stays with that day's

@@ -122,6 +122,10 @@ const canCreateForOthers = computed(() => Boolean(user.data?.roles?.includes("Pr
 // resubmitting an already-created request isn't affected by these rules.
 const BACKDATED_WINDOW_HOURS = 36
 
+// Matches voltamp_fca.setup.install.OTHER_REASON - the Reason that needs
+// details typed in Explanation.
+const OTHER_REASON = "Other"
+
 const props = defineProps({
 	id: {
 		type: String,
@@ -211,6 +215,18 @@ const formFields = createResource({
 				// Task Description isn't reqd on the doctype itself (voltamp_fca's
 				// custom field), but must be mandatory on this form.
 				field.reqd = 1
+			}
+			if (field.fieldname === "reason" && field.options) {
+				// The leading blank option only keeps the Desk from pre-filling a
+				// Reason - this form already starts empty ("Select Reason").
+				field.options = field.options.replace(/^\n+/, "")
+			}
+			if (field.fieldname === "explanation") {
+				// Only for Reason "Other" (see syncOtherReasonDetails) - mirrors
+				// voltamp_fca's depends_on/mandatory_depends_on on this field.
+				const isOther = attendanceRequest.value.reason === OTHER_REASON
+				field.hidden = isOther ? 0 : 1
+				field.reqd = isOther ? 1 : 0
 			}
 			if (["location_address", "latitude", "longitude"].includes(field.fieldname)) {
 				// Keep these visible (as empty, disabled inputs) even in a
@@ -425,6 +441,19 @@ watch(
 watch(
 	() => attendanceRequest.value.employee,
 	(employee_id) => validateEmployee(employee_id)
+)
+
+// Reason "Other" needs the details typed in Explanation ("Other Reason
+// Details"); any other Reason hides it.
+watch(
+	() => attendanceRequest.value.reason,
+	(reason) => {
+		const explanationField = formFields.data?.find((field) => field.fieldname === "explanation")
+		if (!explanationField) return
+		const isOther = reason === OTHER_REASON
+		explanationField.hidden = isOther ? 0 : 1
+		explanationField.reqd = isOther ? 1 : 0
+	}
 )
 
 watch(

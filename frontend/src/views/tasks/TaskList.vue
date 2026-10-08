@@ -100,6 +100,57 @@
 							<div class="text-sm text-gray-800 prose-sm" v-html="selectedTask.description"></div>
 						</div>
 
+						<div class="flex flex-col gap-2" v-if="manpower.data?.can_manage">
+							<span class="text-xs text-gray-500">{{ __("Required Manpower") }}</span>
+							<div class="flex flex-col rounded border border-gray-200">
+								<div
+									v-for="member in manpower.data.members"
+									:key="member.name"
+									class="flex flex-row items-center justify-between gap-2 px-3 py-2 border-b last:border-b-0"
+								>
+									<div class="flex flex-col min-w-0">
+										<span class="text-sm text-gray-800 truncate">
+											{{ member.employee_name || member.employee }}
+										</span>
+										<span class="text-xs text-gray-500 truncate">
+											{{ member.employee }}{{ member.designation ? ` · ${member.designation}` : "" }}
+										</span>
+									</div>
+									<Button
+										variant="ghost"
+										icon="trash-2"
+										:loading="removingEmployee === member.employee"
+										:disabled="isManpowerBusy"
+										@click="removeMember(member.employee)"
+									/>
+								</div>
+								<div v-if="!manpower.data.members.length" class="px-3 py-2 text-sm text-gray-500">
+									{{ __("No team members yet") }}
+								</div>
+							</div>
+							<div class="flex flex-row items-end gap-2">
+								<div class="grow min-w-0">
+									<FormField
+										fieldtype="Link"
+										options="Employee"
+										:label="__('Add Team Member')"
+										query="voltamp_fca.voltamp_fca.task.employee_query_for_task_manpower"
+										:linkFilters="{ task: selectedTask.name }"
+										v-model="newMember"
+									/>
+								</div>
+								<Button
+									variant="solid"
+									class="py-4"
+									:loading="addMemberAction.loading"
+									:disabled="!newMember || isManpowerBusy"
+									@click="addMember"
+								>
+									{{ __("Add") }}
+								</Button>
+							</div>
+						</div>
+
 						<WorkEvidenceSection
 							referenceDoctype="Task"
 							:referenceName="selectedTask.name"
@@ -114,11 +165,12 @@
 
 <script setup>
 import { IonPage, IonHeader, IonContent, IonRefresher, IonRefresherContent } from "@ionic/vue"
-import { Badge, FeatherIcon, LoadingIndicator, createResource } from "frappe-ui"
+import { Badge, FeatherIcon, LoadingIndicator, createResource, toast } from "frappe-ui"
 import { computed, inject, ref } from "vue"
 import { useRouter } from "vue-router"
 
 import TaskItem from "@/components/TaskItem.vue"
+import FormField from "@/components/FormField.vue"
 import CustomIonModal from "@/components/CustomIonModal.vue"
 import WorkEvidenceSection from "@/components/work-evidence/WorkEvidenceSection.vue"
 
@@ -149,10 +201,61 @@ const selectedTask = ref(null)
 const taskPermissions = createResource({ url: "frappe.client.get_doc_permissions" })
 const canEditTaskEvidence = computed(() => Boolean(taskPermissions.data?.permissions?.write))
 
+// Required Manpower (team members) - only shown to, and editable by, a
+// Projects Manager or PM Approver; get_task_manpower returns can_manage
+// false for everyone else, who see the Task exactly as before.
+const manpower = createResource({ url: "voltamp_fca.voltamp_fca.task.get_task_manpower" })
+const addMemberAction = createResource({ url: "voltamp_fca.voltamp_fca.task.add_task_manpower" })
+const removeMemberAction = createResource({ url: "voltamp_fca.voltamp_fca.task.remove_task_manpower" })
+const newMember = ref("")
+const removingEmployee = ref("")
+const isManpowerBusy = computed(() => addMemberAction.loading || removeMemberAction.loading)
+
 function openTaskDetail(task) {
 	selectedTask.value = task
 	isDetailOpen.value = true
 	taskPermissions.submit({ doctype: "Task", docname: task.name })
+	newMember.value = ""
+	manpower.reset()
+	manpower.submit({ task: task.name })
+}
+
+function showManpowerError(error) {
+	toast({
+		title: __("Error"),
+		text: error?.messages?.[0] || __("Could not update team members."),
+		icon: "alert-circle",
+		position: "bottom-center",
+		iconClasses: "text-red-500",
+	})
+}
+
+function addMember() {
+	addMemberAction.submit(
+		{ task: selectedTask.value.name, employee: newMember.value },
+		{
+			onSuccess(data) {
+				manpower.setData(data)
+				newMember.value = ""
+			},
+			onError: showManpowerError,
+		}
+	)
+}
+
+function removeMember(employeeId) {
+	removingEmployee.value = employeeId
+	removeMemberAction.submit(
+		{ task: selectedTask.value.name, employee: employeeId },
+		{
+			onSuccess: (data) => manpower.setData(data),
+			onError: showManpowerError,
+		}
+	)
+		.catch(() => {})
+		.finally(() => {
+			removingEmployee.value = ""
+		})
 }
 
 const STATUS_THEME = {
