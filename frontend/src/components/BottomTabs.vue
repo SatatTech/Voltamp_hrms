@@ -27,9 +27,10 @@ import { useRoute } from "vue-router"
 import { IonTabBar, IonTabButton, IonLabel } from "@ionic/vue"
 
 import HomeIcon from "@/components/icons/HomeIcon.vue"
-import LeaveIcon from "@/components/icons/LeaveIcon.vue"
+// Leaves and Salary tabs are hidden for now - see tabItems below.
+// import LeaveIcon from "@/components/icons/LeaveIcon.vue"
 import ExpenseIcon from "@/components/icons/ExpenseIcon.vue"
-import SalaryIcon from "@/components/icons/SalaryIcon.vue"
+// import SalaryIcon from "@/components/icons/SalaryIcon.vue"
 import AttendanceIcon from "@/components/icons/AttendanceIcon.vue"
 import { inject } from "vue"
 
@@ -48,20 +49,20 @@ const tabItems = [
 		title: __("Attendance"),
 		route: "/dashboard/attendance",
 	},
-	{
-		icon: LeaveIcon,
-		title: __("Leaves"),
-		route: "/dashboard/leaves",
-	},
+	// {
+	// 	icon: LeaveIcon,
+	// 	title: __("Leaves"),
+	// 	route: "/dashboard/leaves",
+	// },
 	{
 		icon: ExpenseIcon,
 		title: __("Expenses"),
 		route: "/dashboard/expense-claims",
 	},
-	{
-		icon: SalaryIcon,
-		title: __("Salary"),
-		route: "/dashboard/salary-slips",
-	},
+	// {
+	// 	icon: SalaryIcon,
+	// 	title: __("Salary"),
+	// 	route: "/dashboard/salary-slips",
+	// },
 ]
 </script>
