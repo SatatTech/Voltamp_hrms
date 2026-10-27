@@ -45,6 +45,7 @@
 				:referenceName="todayTimesheet"
 				:canWrite="true"
 				:ensureReference="ensureTodayTimesheet"
+				@voice-note-transcribed="addToDescription"
 			/>
 
 			<div class="flex flex-row gap-3 mt-4 mb-1">
@@ -359,6 +360,7 @@ watch(
 			timesheetDetail.value = {}
 			applyDefaultActivityType()
 			applyDefaultTask()
+			restoreVoiceText()
 		}
 	},
 	{ immediate: true }
@@ -409,6 +411,29 @@ watch(
 	},
 	{ immediate: true }
 )
+
+// What the employee said in a Voice Note goes into the Task Description (they can still edit it).
+function addToDescription(text) {
+	const current = (timesheetDetail.value.description || "").trim()
+	if (current.includes(text)) return
+	timesheetDetail.value = { ...timesheetDetail.value, description: current ? `${current}\n${text}` : text }
+}
+
+// Before Check In the Task Description lives only on this screen: after a reload, put back the text of
+// today's Voice Notes that no session has used yet.
+const unusedVoiceText = createResource({ url: "voltamp_fca.voltamp_fca.voice_transcription.get_unused_voice_text" })
+function restoreVoiceText() {
+	if (!todayTimesheet.value || isCheckedIn.value) return
+	unusedVoiceText.submit(
+		{ timesheet: todayTimesheet.value },
+		{
+			onSuccess(text) {
+				if (text && !isCheckedIn.value) addToDescription(text)
+			},
+		}
+	)
+}
+watch(todayTimesheet, restoreVoiceText)
 
 // Shared across uploads started together (several photos picked at once),
 // so they all attach to the one Timesheet created for them.
