@@ -131,6 +131,10 @@ const props = defineProps({
 	},
 })
 
+// A Timesheet Voice Note comes back transcribed: the caller can use the text (CheckInPanel.vue
+// adds it to the Task Description).
+const emit = defineEmits(["voice-note-transcribed"])
+
 const photoInput = ref(null)
 const isRecorderOpen = ref(false)
 const isViewerOpen = ref(false)
@@ -182,13 +186,23 @@ function handleVoiceNoteSave({ blob, filename }) {
 	upload(blob, "Voice Note", filename)
 }
 
+// Asked after the upload, so a slow answer from Gemini never holds up the upload itself.
+function fetchTranscript(evidence) {
+	createResource({ url: WORK_EVIDENCE_METHODS.transcribeVoiceNote })
+		.submit({ evidence })
+		.then((text) => {
+			if (text) emit("voice-note-transcribed", text)
+		})
+		.catch(() => {})
+}
+
 async function upload(blob, evidenceType, filename) {
 	inFlightUploads.value += 1
 	uploadStatus.value = { message: __("Uploading {0}…", [filename]), done: false, error: false }
 
 	try {
 		const referenceName = props.referenceName || (await props.ensureReference())
-		await uploadWorkEvidence({
+		const row = await uploadWorkEvidence({
 			referenceDoctype: props.referenceDoctype,
 			referenceName,
 			evidenceType,
@@ -196,6 +210,7 @@ async function upload(blob, evidenceType, filename) {
 			filename,
 		})
 		uploadStatus.value = { message: __("{0} added", [__(evidenceType)]), done: true, error: false }
+		if (evidenceType === "Voice Note" && props.referenceDoctype === "Timesheet" && row?.name) fetchTranscript(row.name)
 		reloadCounts()
 	} catch (error) {
 		uploadStatus.value = {

@@ -12,6 +12,7 @@ export const WORK_EVIDENCE_METHODS = {
 	getEvidenceCounts: "voltamp_fca.voltamp_fca.doctype.work_evidence.work_evidence.get_evidence_counts",
 	uploadEvidence: "voltamp_fca.voltamp_fca.doctype.work_evidence.work_evidence.upload_evidence",
 	deleteEvidence: "frappe.client.delete",
+	transcribeVoiceNote: "voltamp_fca.voltamp_fca.voice_transcription.transcribe_for_app",
 }
 
 // Metadata only, one page at a time - never the whole evidence history in
